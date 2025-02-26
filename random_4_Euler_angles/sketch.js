@@ -1,10 +1,11 @@
 let airplane_model;
-let t = 0.0; // time parameter
+let t = 20.0; // time parameter
 // Initial 4-DOF state: [alpha, beta, gamma, delta]
-// Note: delta is the redundant inner-most rotation (about y)
+// Note: delta is the redundant inner-most rotation (about Y)
 let gimbalState = [0, 0, 0, 0];
-const EPSILON = 0.1; // search neighborhood in radians
-const NUM_SAMPLES = 200; // number of candidate delta values
+const EPSILON = 0.1;      // search neighborhood in radians
+const NUM_SAMPLES = 50;   // number of candidate delta values
+const SPEED_WEIGHT = 2.0; // penalty weight for change in delta only
 
 function preload() {
   airplane_model = loadModel('../airplane.obj');
@@ -22,7 +23,8 @@ function setup() {
   let upX = 0, upY = 1, upZ = 0;
   camera(camX, camY, camZ, targetX, targetY, targetZ, upX, upY, upZ);
 
-  // createLoop({ duration: 280.0 / 30.0, gif: true });
+  createLoop({ duration: 300.0 / 30.0, gif: true })
+
 }
 
 function draw() {
@@ -77,7 +79,7 @@ function draw() {
   strokeWeight(1);
   rotateX(PI);
   model(airplane_model);
-  pop(); // end inner-most ring
+  pop(); // end innermost ring
   pop(); // end third ring
   pop(); // end middle ring
   pop(); // end outer ring
@@ -96,18 +98,17 @@ function draw() {
   cylinder(2, 400);
   pop();
 
-
-  // Reference airplane
-  push();
-  translate(0, 100, 0);
-  applyQuaternion(q);
-  scale(400);
-  fill(255);
-  stroke(0);
-  strokeWeight(1);
-  rotateX(PI);
-  model(airplane_model);
-  pop();
+  // // Reference airplane
+  // push();
+  // translate(0, 100, 0);
+  // applyQuaternion(q);
+  // scale(400);
+  // fill(255);
+  // stroke(0);
+  // strokeWeight(1);
+  // rotateX(PI);
+  // model(airplane_model);
+  // pop();
 }
 
 // ===================== Helper Functions =====================
@@ -175,7 +176,7 @@ function quatToMatrix(q) {
 
 // Given R_next and a candidate redundant parameter delta,
 // compute the candidate gimbal state [alpha, beta, gamma, delta].
-// Here, we “remove” the redundant rotation about Y:
+// Here we “remove” the redundant rotation about Y.
 function candidateGimbalState(R_next, delta) {
   let Ry_minus = rotY(-delta);
   let tildeR = multiplyMatrices(R_next, Ry_minus);
@@ -186,8 +187,9 @@ function candidateGimbalState(R_next, delta) {
 }
 
 // Safety function using the actual determinant of JJ^T.
-// For FK(α,β,γ,δ)= R_z(α) R_y(β) R_x(γ) R_z(δ),
-// we compute the joint axes as follows:
+// (We assume FK(α,β,γ,δ) = R_z(α) R_y(β) R_x(γ) R_z(δ) for safety,
+// but note that our candidate function uses a redundant rotation about Y.
+// In a real system, you would ensure consistency between these models.)
 function safety(gimbal) {
   let alpha = gimbal[0];
   let beta = gimbal[1];
@@ -238,19 +240,23 @@ function safety(gimbal) {
 }
 
 // Update the gimbal state given the current state and next rotation R_next.
-// We search for the best candidate delta in a small neighborhood around the current delta.
+// We now incorporate both safety and a speed penalty that penalizes only the change in delta.
 function updateGimbalState(currentState, R_next) {
   let currentDelta = currentState[3];
   let bestDelta = currentDelta;
-  let bestSafety = -Infinity;
+  let bestObjective = -Infinity;
 
   // Sample candidate delta values in [currentDelta - EPSILON, currentDelta + EPSILON]
   for (let i = 0; i < NUM_SAMPLES; i++) {
     let deltaCandidate = currentDelta - EPSILON + (2 * EPSILON) * (i / (NUM_SAMPLES - 1));
     let candidate = candidateGimbalState(R_next, deltaCandidate);
     let candidateSafety = safety(candidate);
-    if (candidateSafety > bestSafety) {
-      bestSafety = candidateSafety;
+    // Penalize change only in delta:
+    let deltaDiff = deltaCandidate - currentDelta;
+    let speedPenalty = deltaDiff * deltaDiff;
+    let candidateObjective = candidateSafety - SPEED_WEIGHT * speedPenalty;
+    if (candidateObjective > bestObjective) {
+      bestObjective = candidateObjective;
       bestDelta = deltaCandidate;
     }
   }
@@ -261,7 +267,7 @@ function updateGimbalState(currentState, R_next) {
 // Dummy pseudoRandomQuaternion function.
 // Replace with your actual implementation.
 function pseudoRandomQuaternion(t) {
-  // For example, rotate about a fixed axis slowly.
+  // For example, a slow rotation about the y-axis.
   let angle = t * 0.1;
   let axis = { x: 0, y: 1, z: 0 };
   let sinHalf = Math.sin(angle / 2);
@@ -273,5 +279,3 @@ function pseudoRandomQuaternion(t) {
     w: cosHalf
   };
 }
-
-// (Your drawRing and drawGrid functions remain as in your original code)
